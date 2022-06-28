@@ -1,77 +1,59 @@
-import api.ProductService;
-import com.github.javafaker.Faker;
+import db.model.Categories;
+import db.model.Products;
 import dto.Product;
-import okhttp3.ResponseBody;
 import org.hamcrest.CoreMatchers;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import retrofit2.Response;
-import utils.RetrofitUtils;
 
 import java.io.IOException;
+import java.util.List;
 
 import static org.hamcrest.CoreMatchers.containsStringIgnoringCase;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 
-public class AddProductTest {
-
-    static ProductService productService;
-    Product product = null;
-    Faker faker = new Faker();
-    Integer id = null;
-
-    @BeforeAll
-    static void beforeAll(){
-        productService = RetrofitUtils.getRetrofit().create(ProductService.class);
-    }
-
-    @BeforeEach
-    void createProduct(){
-        product = new Product()
-                .addTitle(faker.food().ingredient())
-                .addCategoryTitle("Food")
-                .addPrice((int) (Math.random() * 10000));
-        id = null;
-    }
+public class AddProductTest extends ProductAbstractTest {
+    private Integer id;
 
     @Test
-    void addProductPositiveTest() throws IOException {
-        Response<Product> response = productService.addProduct(product).execute();
+    void addProductPositiveTestForFoodCategory() throws IOException {
+        Response<Product> response = getProductService().addProduct(getProduct()).execute();
         id = response.body().getId();
         assertThat(response.code(), CoreMatchers.is(201));
         assertThat(id, CoreMatchers.notNullValue());
         assertThat(response.isSuccessful(), CoreMatchers.is(true));
-        assertThat(response.body().getTitle(), CoreMatchers.is(product.getTitle()));
-        assertThat(response.body().getPrice(), CoreMatchers.is(product.getPrice()));
-        assertThat(response.body().getCategoryTitle(), CoreMatchers.is("Food"));
+        Products productDB = getMyBatisUtils().selectFromProductsById(id);
+        assertThat(response.body().getTitle(), CoreMatchers.is(productDB.getTitle()));
+        assertThat(response.body().getPrice(), CoreMatchers.is(productDB.getPrice()));
+        assertThat(response.body().getCategoryTitle(), CoreMatchers
+                .is(getMyBatisUtils().selectFromCategoriesById(productDB.getCategory_id()).get(0).getTitle()));
     }
 
     @Test
-    void addProductPositiveTestForElectronic() throws IOException {
-        product.setCategoryTitle("Electronic");
-        product.setTitle(faker.commerce().productName());
-        Response<Product> response = productService.addProduct(product).execute();
+    void addProductPositiveTestForElectronicCategory() throws IOException {
+        getProduct().setCategoryTitle("Electronic");
+        getProduct().setTitle(getFaker().commerce().productName());
+        Response<Product> response = getProductService().addProduct(getProduct()).execute();
         id = response.body().getId();
         assertThat(response.code(), CoreMatchers.is(201));
         assertThat(id, CoreMatchers.notNullValue());
-        assertThat(response.body().getTitle(), CoreMatchers.is(product.getTitle()));
-        assertThat(response.body().getPrice(), CoreMatchers.is(product.getPrice()));
-        assertThat(response.body().getCategoryTitle(), CoreMatchers.is("Electronic"));
+        Products productDB = getMyBatisUtils().selectFromProductsById(id);
+        assertThat(response.body().getTitle(), CoreMatchers.is(productDB.getTitle()));
+        assertThat(response.body().getPrice(), CoreMatchers.is(productDB.getPrice()));
+        assertThat(response.body().getCategoryTitle(), CoreMatchers
+                .is(getMyBatisUtils().selectFromCategoriesById(productDB.getCategory_id()).get(0).getTitle()));
     }
 
     @Test
     void addTheSameProductTwice() throws IOException {
-        Response<Product> response = productService.addProduct(product).execute();
+        Response<Product> response = getProductService().addProduct(getProduct()).execute();
         id = response.body().getId();
         assertThat(response.code(), CoreMatchers.is(201));
         assertThat(id, CoreMatchers.notNullValue());
         assertThat(response.isSuccessful(), CoreMatchers.is(true));
 
         // adding the same product for the second time
-        Response<Product> response2 = productService.addProduct(product).execute();
+        Response<Product> response2 = getProductService().addProduct(getProduct()).execute();
         int id2 = response2.body().getId();
         assertThat(response2.code(), CoreMatchers.is(201));
         assertThat(id2, CoreMatchers.notNullValue());
@@ -85,16 +67,20 @@ public class AddProductTest {
         // checking that id of the second entity is different
         assertThat(id, CoreMatchers.not(id2));
 
-        // cleaning second product after test
-        Response<ResponseBody> response3 = productService.deleteProductById(id2).execute();
-        assertThat(response3.isSuccessful(), CoreMatchers.is(true));
+        // checking DB has both products
+        List<Products> list = getMyBatisUtils().getProductsByTitle(getProduct().getTitle());
+        assertThat(list.size(), CoreMatchers.is(2));
+        assertThat(list.get(0).getId(), CoreMatchers.is((long) id));
+        assertThat(list.get(1).getId(), CoreMatchers.is((long) id2));
     }
 
     @Test
     void addProductNegativeTestNonNullId() throws IOException {
         // testing Bad Request code for non null id in the request body
-        product.setId(100);
-        Response<Product> response = productService.addProduct(product).execute();
+        //checking for max Id in DB
+        int maxId = (int) getMyBatisUtils().getMaxProductId();
+        getProduct().setId(maxId+1);
+        Response<Product> response = getProductService().addProduct(getProduct()).execute();
         String errorBody = response.errorBody().string();
         assertThat(response.code(), equalTo(400));
         assertThat(errorBody, CoreMatchers.containsString("Id must be null for new entity"));
@@ -103,8 +89,19 @@ public class AddProductTest {
     @Test
     void addProductNegativeTestWrongCategoryTitle() throws IOException {
         // test for request body with wrong category title
-        product.setCategoryTitle("Clothes");
-        Response<Product> response = productService.addProduct(product).execute();
+        // check in DB that there is no such category in categories table
+        List<Categories> allCategories = getMyBatisUtils().getAllCategories();
+        String nonExistentCategoryTitle;
+        while(true){
+         nonExistentCategoryTitle = getFaker().commerce().productName();
+            System.out.println(nonExistentCategoryTitle);
+        for (Categories category : allCategories){
+            if(category.getTitle().equals(nonExistentCategoryTitle)) continue;
+        }
+        break;
+        }
+        getProduct().setCategoryTitle(nonExistentCategoryTitle);
+        Response<Product> response = getProductService().addProduct(getProduct()).execute();
         String errorBody = response.errorBody().string();
         assertThat(response.code(), equalTo(500));
         assertThat(errorBody, CoreMatchers.containsString("Internal Server Error"));
@@ -113,8 +110,8 @@ public class AddProductTest {
     @Test
     void addProductNegativeTestNoCategoryTitle() throws IOException {
         // testing Internal Server Error code for null category title in the request body
-       product.setCategoryTitle(null);
-        Response<Product> response = productService.addProduct(product).execute();
+        getProduct().setCategoryTitle(null);
+        Response<Product> response = getProductService().addProduct(getProduct()).execute();
         String errorBody = response.errorBody().string();
         assertThat(response.code(), equalTo(500));
         assertThat(errorBody, CoreMatchers.containsString("Internal Server Error"));
@@ -123,47 +120,38 @@ public class AddProductTest {
     @Test
     void addProductTestNoTitle() throws IOException {
         // add product with null title in the request body
-        product.setTitle(null);
-        Response<Product> response = productService.addProduct(product).execute();
+        getProduct().setTitle(null);
+        Response<Product> response = getProductService().addProduct(getProduct()).execute();
 
         assertThat(response.code(), equalTo(201));
         id = response.body().getId();
         assertThat(id, CoreMatchers.notNullValue());
-        assertThat(response.body().getPrice(), CoreMatchers.is(product.getPrice()));
+        assertThat(response.body().getPrice(), CoreMatchers.is(getProduct().getPrice()));
     }
 
     @Test
     void addProductTestNoPrice() throws IOException {
         // add product with null price in the request body
-        product.setPrice(null);
-        Response<Product> response = productService.addProduct(product).execute();
+        getProduct().setPrice(null);
+        Response<Product> response = getProductService().addProduct(getProduct()).execute();
 
         assertThat(response.code(), equalTo(201));
         id = response.body().getId();
         assertThat(id, CoreMatchers.notNullValue());
-        assertThat(response.body().getTitle(), CoreMatchers.is(product.getTitle()));
+        assertThat(response.body().getTitle(), CoreMatchers.is(getProduct().getTitle()));
         assertThat(response.body().getPrice(), CoreMatchers.is(0));
     }
 
     @Test
     void get404NotFoundError(){
         try {
-            Response<Product> response = productService.addProductWrongEndpoint(product).execute();
+            Response<Product> response =  getProductService().addProductWrongEndpoint(getProduct()).execute();
 
             assertThat(response.code(), equalTo(404));
             assertThat(response.errorBody().string(), containsStringIgnoringCase("Not Found"));
 
         } catch (IOException e){
             e.printStackTrace();
-        }
-    }
-
-
-    @AfterEach
-    void tearDown() throws IOException {
-       if (id != null) {
-            Response<ResponseBody> response = productService.deleteProductById(id).execute();
-            assertThat(response.isSuccessful(), CoreMatchers.is(true));
         }
     }
 }
