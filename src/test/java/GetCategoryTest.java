@@ -1,48 +1,71 @@
 import api.CategoryService;
+import db.model.Categories;
+import db.model.Products;
 import dto.GetCategoryResponse;
+import dto.Product;
 import okhttp3.ResponseBody;
+import org.junit.jupiter.params.provider.CsvFileSource;
+import utils.MyBatisUtils;
 import utils.RetrofitUtils;
 import org.hamcrest.CoreMatchers;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import retrofit2.Response;
 
+import java.io.FileWriter;
 import java.io.IOException;
+import java.util.List;
+import java.util.Locale;
 
 import static org.hamcrest.CoreMatchers.*;
 import static org.hamcrest.MatcherAssert.assertThat;
 
-public class GetCategoryTest {
-    static CategoryService categoryService;
+public class GetCategoryTest extends AbstractTest{
+    private static CategoryService categoryService = RetrofitUtils.getRetrofit().create(CategoryService.class);
+
     @BeforeAll
-    static void beforeAll(){
-        categoryService = RetrofitUtils.getRetrofit().create(CategoryService.class);
+    static void beforeAll() throws IOException {
+        MyBatisUtils myBatisUtils = getMyBatisUtils();
+        List<Categories> categories = myBatisUtils.getAllCategories();
+        FileWriter outfile = null;
+        try{
+            outfile = new FileWriter("src/test/resources/categoriesList.csv");
+            for( Categories category : categories){
+                try {
+                    outfile.append(String.format(Locale.US,"%d, \"%s\"\n", category.getId(), category.getTitle()));
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+            outfile.flush();
+        } finally {
+            if(outfile != null) outfile.close();
+        }
     }
 
-    @ParameterizedTest
-    @CsvSource({ "1, 'Food'", "2, 'Electronic'"})
+    @ParameterizedTest()
+    @CsvFileSource(files = "src/test/resources/categoriesList.csv")
     void checkExistingCategoriesTest(int id, String title){
         try {
             Response<GetCategoryResponse> response = categoryService.getCategoryById(id).execute();
-
             assertThat(response.isSuccessful(), CoreMatchers.is(true));
             assertThat(response.code(), equalTo(200));
             assertThat(response.body().getId(), equalTo(id));
             assertThat(response.body().getTitle(), equalTo(title));
-            response.body().getProducts().forEach(product ->
+            List<Product> products = response.body().getProducts();
+                    products.forEach(product ->
                     assertThat(product.getCategoryTitle(), equalTo(title)));
-
+            List<Products> productsFromDB = getMyBatisUtils().getAllProductsForCategoryId(id);
+            for(int i = 0; i < productsFromDB.size(); i++){
+                assertThat(productsFromDB.get(i).getId(), equalTo((long) products.get(i).getId()));
+                assertThat(productsFromDB.get(i).getTitle(), equalTo(products.get(i).getTitle()));
+                assertThat(productsFromDB.get(i).getPrice(), equalTo(products.get(i).getPrice()));
+            }
         } catch (IOException e){
             e.printStackTrace();
         }
     }
-//
-//    @Test
-//    void getUnauthorizedCode(){
-//// ?? cannot get 401 unauthorized and 403 Forbidden
-//    }
 
     @Test
     void get405Error(){
@@ -68,7 +91,6 @@ public class GetCategoryTest {
         } catch (IOException e){
             e.printStackTrace();
         }
-
     }
 
     @Test
